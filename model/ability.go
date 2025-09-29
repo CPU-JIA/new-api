@@ -2,7 +2,6 @@ package model
 
 import (
 	"errors"
-	"fmt"
 	"one-api/common"
 	"strings"
 	"sync"
@@ -103,43 +102,8 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 }
 
 func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel, error) {
-	var abilities []Ability
-
-	var err error = nil
-	channelQuery, err := getChannelQuery(group, model, retry)
-	if err != nil {
-		return nil, err
-	}
-	if common.UsingSQLite || common.UsingPostgreSQL {
-		err = channelQuery.Order("weight DESC").Find(&abilities).Error
-	} else {
-		err = channelQuery.Order("weight DESC").Find(&abilities).Error
-	}
-	if err != nil {
-		return nil, err
-	}
-	channel := Channel{}
-	if len(abilities) > 0 {
-		// Randomly choose one
-		weightSum := uint(0)
-		for _, ability_ := range abilities {
-			weightSum += ability_.Weight + 10
-		}
-		// Randomly choose one
-		weight := common.GetRandomInt(int(weightSum))
-		for _, ability_ := range abilities {
-			weight -= int(ability_.Weight) + 10
-			//log.Printf("weight: %d, ability weight: %d", weight, *ability_.Weight)
-			if weight <= 0 {
-				channel.Id = ability_.ChannelId
-				break
-			}
-		}
-	} else {
-		return nil, nil
-	}
-	err = DB.First(&channel, "id = ?", channel.Id).Error
-	return &channel, err
+	// Use optimized version with fallback for safety
+	return GetRandomSatisfiedChannelWithFallback(group, model, retry)
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {
@@ -190,73 +154,10 @@ func (channel *Channel) DeleteAbilities() error {
 // UpdateAbilities updates abilities of this channel.
 // Make sure the channel is completed before calling this function.
 func (channel *Channel) UpdateAbilities(tx *gorm.DB) error {
-	isNewTx := false
-	// 如果没有传入事务，创建新的事务
-	if tx == nil {
-		tx = DB.Begin()
-		if tx.Error != nil {
-			return tx.Error
-		}
-		isNewTx = true
-		defer func() {
-			if r := recover(); r != nil {
-				tx.Rollback()
-			}
-		}()
-	}
-
-	// First delete all abilities of this channel
-	err := tx.Where("channel_id = ?", channel.Id).Delete(&Ability{}).Error
-	if err != nil {
-		if isNewTx {
-			tx.Rollback()
-		}
-		return err
-	}
-
-	// Then add new abilities
-	models_ := strings.Split(channel.Models, ",")
-	groups_ := strings.Split(channel.Group, ",")
-	abilitySet := make(map[string]struct{})
-	abilities := make([]Ability, 0, len(models_))
-	for _, model := range models_ {
-		for _, group := range groups_ {
-			key := group + "|" + model
-			if _, exists := abilitySet[key]; exists {
-				continue
-			}
-			abilitySet[key] = struct{}{}
-			ability := Ability{
-				Group:     group,
-				Model:     model,
-				ChannelId: channel.Id,
-				Enabled:   channel.Status == common.ChannelStatusEnabled,
-				Priority:  channel.Priority,
-				Weight:    uint(channel.GetWeight()),
-				Tag:       channel.Tag,
-			}
-			abilities = append(abilities, ability)
-		}
-	}
-
-	if len(abilities) > 0 {
-		for _, chunk := range lo.Chunk(abilities, 50) {
-			err = tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&chunk).Error
-			if err != nil {
-				if isNewTx {
-					tx.Rollback()
-				}
-				return err
-			}
-		}
-	}
-
-	// 如果是新创建的事务，需要提交
-	if isNewTx {
-		return tx.Commit().Error
-	}
-
-	return nil
+	// For single channel updates, we can use the optimized batch function
+	// with a single channel slice for consistency and performance
+	channels := []*Channel{channel}
+	return UpdateAbilitiesBatch(channels, tx, nil)
 }
 
 func UpdateAbilityStatus(channelId int, status bool) error {
@@ -284,57 +185,6 @@ func UpdateAbilityByTag(tag string, newTag *string, priority *int64, weight *uin
 var fixLock = sync.Mutex{}
 
 func FixAbility() (int, int, error) {
-	lock := fixLock.TryLock()
-	if !lock {
-		return 0, 0, errors.New("已经有一个修复任务在运行中，请稍后再试")
-	}
-	defer fixLock.Unlock()
-
-	// truncate abilities table
-	if common.UsingSQLite {
-		err := DB.Exec("DELETE FROM abilities").Error
-		if err != nil {
-			common.SysLog(fmt.Sprintf("Delete abilities failed: %s", err.Error()))
-			return 0, 0, err
-		}
-	} else {
-		err := DB.Exec("TRUNCATE TABLE abilities").Error
-		if err != nil {
-			common.SysLog(fmt.Sprintf("Truncate abilities failed: %s", err.Error()))
-			return 0, 0, err
-		}
-	}
-	var channels []*Channel
-	// Find all channels
-	err := DB.Model(&Channel{}).Find(&channels).Error
-	if err != nil {
-		return 0, 0, err
-	}
-	if len(channels) == 0 {
-		return 0, 0, nil
-	}
-	successCount := 0
-	failCount := 0
-	for _, chunk := range lo.Chunk(channels, 50) {
-		ids := lo.Map(chunk, func(c *Channel, _ int) int { return c.Id })
-		// Delete all abilities of this channel
-		err = DB.Where("channel_id IN ?", ids).Delete(&Ability{}).Error
-		if err != nil {
-			common.SysLog(fmt.Sprintf("Delete abilities failed: %s", err.Error()))
-			failCount += len(chunk)
-			continue
-		}
-		// Then add new abilities
-		for _, channel := range chunk {
-			err = channel.AddAbilities(nil)
-			if err != nil {
-				common.SysLog(fmt.Sprintf("Add abilities for channel %d failed: %s", channel.Id, err.Error()))
-				failCount++
-			} else {
-				successCount++
-			}
-		}
-	}
-	InitChannelCache()
-	return successCount, failCount, nil
+	// Use optimized batch version with default options
+	return FixAbilityBatch(DefaultTxOptions())
 }

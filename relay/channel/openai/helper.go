@@ -69,7 +69,7 @@ func handleGeminiFormat(c *gin.Context, data string, info *relaycommon.RelayInfo
 	}
 
 	// send gemini format response
-	c.Render(-1, common.CustomEvent{Data: "data: " + string(geminiResponseStr)})
+	c.Render(-1, &common.CustomEvent{Data: "data: " + string(geminiResponseStr)})
 	_ = helper.FlushWriter(c)
 	return nil
 }
@@ -247,7 +247,7 @@ func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStream
 		}
 
 		// 发送最终的 Gemini 响应
-		c.Render(-1, common.CustomEvent{Data: "data: " + string(geminiResponseStr)})
+		c.Render(-1, &common.CustomEvent{Data: "data: " + string(geminiResponseStr)})
 		_ = helper.FlushWriter(c)
 	}
 }

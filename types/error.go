@@ -77,6 +77,13 @@ const (
 	// quota error
 	ErrorCodeInsufficientUserQuota      ErrorCode = "insufficient_user_quota"
 	ErrorCodePreConsumeTokenQuotaFailed ErrorCode = "pre_consume_token_quota_failed"
+
+	// security error
+	ErrorCodeChannelKeyDecryptionFailed ErrorCode = "channel:key_decryption_failed"
+	ErrorCodeChannelKeyEncryptionFailed ErrorCode = "channel:key_encryption_failed"
+	ErrorCodeSecurityModuleNotInitialized ErrorCode = "security:module_not_initialized"
+	ErrorCodeSecurityKeyMigrationFailed ErrorCode = "security:key_migration_failed"
+	ErrorCodeSecurityValidationFailed  ErrorCode = "security:validation_failed"
 )
 
 type NewAPIError struct {

@@ -106,7 +106,6 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	} else {
 		return ClaudeHandler(c, resp, info, a.RequestMode)
 	}
-	return
 }
 
 func (a *Adaptor) GetModelList() []string {

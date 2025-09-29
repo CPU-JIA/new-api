@@ -1,0 +1,36 @@
+# golangci-lint configuration
+# https://golangci-lint.run/usage/configuration/
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    - gocyclo
+    - gofmt
+    - goimports
+    - revive
+    - gosec
+    - misspell
+    - unconvert
+    - unparam
+    - whitespace
+  disable:
+    - deadcode
+    - varcheck
+    - structcheck
+    - golint
+    - scopelint
+    - interfacer
+    - maligned
+    - nakedret

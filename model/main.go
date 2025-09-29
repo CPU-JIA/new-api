@@ -202,7 +202,26 @@ func InitDB() (err error) {
 		}
 		common.SysLog("database migration started")
 		err = migrateDB()
-		return err
+		if err != nil {
+			return err
+		}
+
+		// Apply performance indexes for N+1 query optimization
+		common.SysLog("applying performance indexes...")
+		err = ApplyPerformanceIndexes(DB)
+		if err != nil {
+			common.SysLog("warning: performance index application failed: " + err.Error())
+			// Don't fail startup for index errors, just log warning
+		} else {
+			common.SysLog("performance indexes applied successfully")
+		}
+
+		// Optional performance validation
+		if os.Getenv("DB_PERFORMANCE_VALIDATION") == "true" {
+			RunPerformanceValidation()
+		}
+
+		return nil
 	} else {
 		common.FatalLog(err)
 	}
