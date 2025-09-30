@@ -284,6 +284,7 @@ func migrateDB() error {
 		&Setup{},
 		&TwoFA{},
 		&TwoFABackupCode{},
+		&PromptCacheMetrics{},
 	)
 	if err != nil {
 		return err

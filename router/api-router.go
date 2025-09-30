@@ -235,5 +235,25 @@ func SetApiRouter(router *gin.Engine) {
 			modelsRoute.PUT("/", controller.UpdateModelMeta)
 			modelsRoute.DELETE("/:id", controller.DeleteModelMeta)
 		}
+
+		// Cache Analytics API routes
+		cacheRoute := apiRouter.Group("/cache")
+		cacheRoute.Use(middleware.UserAuth()) // Require authentication
+		{
+			// Overview metrics
+			cacheRoute.GET("/metrics/overview", controller.GetCacheMetricsOverview)
+
+			// Time-series chart data
+			cacheRoute.GET("/metrics/chart", controller.GetCacheMetricsChart)
+
+			// Channel-grouped metrics (admin only)
+			cacheRoute.GET("/metrics/channels", middleware.AdminAuth(), controller.GetCacheMetricsByChannels)
+
+			// User-specific metrics (self or admin)
+			cacheRoute.GET("/metrics/user/:user_id", controller.GetCacheMetricsByUser)
+
+			// CacheWarmer status (admin only)
+			cacheRoute.GET("/warmer/status", middleware.AdminAuth(), controller.GetCacheWarmerStatus)
+		}
 	}
 }

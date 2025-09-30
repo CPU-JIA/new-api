@@ -337,6 +337,13 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 		Other:            other,
 	})
 
+	// Record prompt cache metrics for analytics
+	// Only record if there are cache-related tokens (cache hits or cache creation)
+	if cacheTokens > 0 || cacheCreationTokens > 0 {
+		recordPromptCacheMetrics(relayInfo, usage, quota, cacheTokens, cacheCreationTokens,
+			promptTokens, completionTokens, modelRatio, groupRatio, completionRatio, cacheRatio, cacheCreationRatio)
+	}
+
 }
 
 func CalcOpenRouterCacheCreateTokens(usage dto.Usage, priceData types.PriceData) int {
@@ -561,4 +568,71 @@ func checkAndSendQuotaNotify(relayInfo *relaycommon.RelayInfo, quota int, preCon
 			}
 		}
 	})
+}
+
+// recordPromptCacheMetrics records prompt cache analytics data
+// This function calculates cache effectiveness metrics and saves them for dashboard visualization
+func recordPromptCacheMetrics(relayInfo *relaycommon.RelayInfo, usage *dto.Usage, actualCost int,
+	cacheReadTokens, cacheCreationTokens, promptTokens, completionTokens int,
+	modelRatio, groupRatio, completionRatio, cacheRatio, cacheCreationRatio float64) {
+
+	// Calculate uncached tokens (normal 1.0x cost tokens)
+	originalPromptTokens := usage.PromptTokens // Original total before adjustments
+	uncachedTokens := promptTokens            // promptTokens already excludes cached tokens in PostClaudeConsumeQuota
+
+	// Calculate cache hit rate
+	cacheHitRate := 0.0
+	if originalPromptTokens > 0 {
+		cacheHitRate = float64(cacheReadTokens) / float64(originalPromptTokens)
+	}
+
+	// Calculate hypothetical cost without any caching (all tokens at 1.0x rate)
+	costWithoutCache := float64(originalPromptTokens) + float64(completionTokens)*completionRatio
+	costWithoutCache = costWithoutCache * groupRatio * modelRatio
+
+	// Actual cost is already calculated in PostClaudeConsumeQuota
+	costWithCache := float64(actualCost)
+
+	// Calculate cost saved
+	costSaved := costWithoutCache - costWithCache
+	if costSaved < 0 {
+		costSaved = 0 // Safety check
+	}
+
+	// Get channel name
+	channelName := ""
+	if channel, err := model.GetChannelById(relayInfo.ChannelId, true); err == nil {
+		channelName = channel.Name
+	}
+
+	// Create metrics record
+	metrics := &model.PromptCacheMetrics{
+		CreatedAt:           time.Now(),
+		ChannelId:           relayInfo.ChannelId,
+		ChannelName:         channelName,
+		UserId:              relayInfo.UserId,
+		TokenId:             relayInfo.TokenId,
+		LogId:               0, // TODO: Get log ID if needed for correlation
+		ModelName:           relayInfo.OriginModelName,
+		PromptTokens:        originalPromptTokens,
+		CacheReadTokens:     cacheReadTokens,
+		CacheCreationTokens: cacheCreationTokens,
+		CompletionTokens:    completionTokens,
+		UncachedTokens:      uncachedTokens,
+		CacheHitRate:        cacheHitRate,
+		CostWithoutCache:    costWithoutCache,
+		CostWithCache:       costWithCache,
+		CostSaved:           costSaved,
+		IsWarmup:            false, // User requests are not warmup
+	}
+
+	// Insert asynchronously to avoid blocking the request
+	go func() {
+		if err := model.InsertPromptCacheMetrics(metrics); err != nil {
+			common.SysError(fmt.Sprintf("Failed to record prompt cache metrics: %v", err))
+		} else if common.DebugEnabled {
+			common.SysLog(fmt.Sprintf("PromptCacheMetrics: Recorded for channel=%d, hit_rate=%.2f%%, saved=%.2f",
+				relayInfo.ChannelId, cacheHitRate*100, costSaved))
+		}
+	}()
 }
