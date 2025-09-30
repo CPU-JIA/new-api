@@ -101,6 +101,10 @@ func main() {
 
 	go controller.AutomaticallyTestChannels()
 
+	// Start Cache Warmer Service for pool cache optimization
+	service.GetCacheWarmerService().Start()
+	common.SysLog("Cache Warmer service started for intelligent pool cache keep-alive")
+
 	if common.IsMasterNode && constant.UpdateTask {
 		gopool.Go(func() {
 			controller.UpdateMidjourneyTaskBulk()
