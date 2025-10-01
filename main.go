@@ -184,6 +184,51 @@ func main() {
 	}
 }
 
+// validateCriticalEnvVars checks critical environment variables to prevent runtime errors
+func validateCriticalEnvVars() {
+	// Check database configuration
+	sqlDSN := os.Getenv("SQL_DSN")
+	sqlitePath := os.Getenv("SQLITE_PATH")
+	if sqlDSN == "" && sqlitePath == "" {
+		common.SysLog("⚠️  Warning: No database configuration found (SQL_DSN or SQLITE_PATH)")
+		common.SysLog("⚠️  警告：未找到数据库配置（SQL_DSN 或 SQLITE_PATH）")
+		common.SysLog("    Using default SQLite path: ./data/")
+	}
+
+	// Check SESSION_SECRET for multi-node deployment
+	if os.Getenv("NODE_TYPE") != "" || os.Getenv("REDIS_CONN_STRING") != "" {
+		if os.Getenv("SESSION_SECRET") == "" {
+			common.SysLog("⚠️  Warning: SESSION_SECRET not set for multi-node/Redis deployment")
+			common.SysLog("⚠️  警告：多节点或Redis部署未设置SESSION_SECRET")
+			common.SysLog("    This will cause session inconsistency across nodes")
+		}
+	}
+
+	// Check CRYPTO_SECRET if using Redis
+	if os.Getenv("REDIS_CONN_STRING") != "" {
+		if os.Getenv("CRYPTO_SECRET") == "" {
+			common.SysLog("⚠️  Warning: CRYPTO_SECRET not set while using Redis")
+			common.SysLog("⚠️  警告：使用Redis时未设置CRYPTO_SECRET")
+			common.SysLog("    This may cause encryption/decryption issues")
+		}
+	}
+
+	// Warn if DEBUG is enabled (potential production security issue)
+	if os.Getenv("DEBUG") == "true" {
+		common.SysLog("⚠️  Warning: DEBUG mode is ENABLED")
+		common.SysLog("⚠️  警告：调试模式已启用")
+		common.SysLog("    - Session Secure flag is DISABLED (allows HTTP)")
+		common.SysLog("    - This should NOT be used in production environment!")
+		common.SysLog("    - 生产环境不应启用DEBUG模式！")
+	}
+
+	// Check FRONTEND_BASE_URL for multi-node deployment
+	if os.Getenv("NODE_TYPE") != "" && os.Getenv("FRONTEND_BASE_URL") == "" {
+		common.SysLog("⚠️  Warning: FRONTEND_BASE_URL not set for multi-node deployment")
+		common.SysLog("⚠️  警告：多节点部署未设置FRONTEND_BASE_URL")
+	}
+}
+
 func InitResources() error {
 	// Initialize resources here if needed
 	// This is a placeholder function for future resource initialization
@@ -195,6 +240,9 @@ func InitResources() error {
 
 	// 加载环境变量
 	common.InitEnv()
+
+	// Validate critical environment variables
+	validateCriticalEnvVars()
 
 	logger.SetupLogger()
 
