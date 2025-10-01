@@ -26,7 +26,6 @@ import {
   DEBUG_TABS,
 } from '../../constants/playground.constants';
 import {
-  getUserIdFromLocalStorage,
   handleApiError,
   processThinkTags,
   processIncompleteThinkTags,
@@ -187,7 +186,6 @@ export const useApiRequest = (
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'New-Api-User': getUserIdFromLocalStorage(),
           },
           body: JSON.stringify(payload),
         });
@@ -297,7 +295,6 @@ export const useApiRequest = (
       const source = new SSE(API_ENDPOINTS.CHAT_COMPLETIONS, {
         headers: {
           'Content-Type': 'application/json',
-          'New-Api-User': getUserIdFromLocalStorage(),
         },
         method: 'POST',
         payload: JSON.stringify(payload),
