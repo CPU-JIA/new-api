@@ -21,6 +21,12 @@ var TopUpLink = ""
 var QuotaPerUnit = 500 * 1000.0 // $0.002 / 1K tokens
 var DisplayInCurrencyEnabled = true
 var DisplayTokenStatEnabled = true
+
+// Currency conversion rate (configurable via admin panel)
+// Default: $1 USD = ¥7.2 CNY
+// Administrators can update this value based on current exchange rates
+var USDToCNYRate = 7.2
+
 var DrawingEnabled = true
 var TaskEnabled = true
 var DataExportEnabled = true

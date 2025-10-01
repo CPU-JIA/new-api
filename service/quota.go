@@ -576,14 +576,20 @@ func recordPromptCacheMetrics(relayInfo *relaycommon.RelayInfo, usage *dto.Usage
 	cacheReadTokens, cacheCreationTokens, promptTokens, completionTokens int,
 	modelRatio, groupRatio, completionRatio, cacheRatio, cacheCreationRatio float64) {
 
-	// Calculate uncached tokens (normal 1.0x cost tokens)
-	originalPromptTokens := usage.PromptTokens // Original total before adjustments
-	uncachedTokens := promptTokens            // promptTokens already excludes cached tokens in PostClaudeConsumeQuota
+	// promptTokens parameter already represents uncached tokens (adjusted in PostClaudeConsumeQuota)
+	uncachedTokens := promptTokens
+
+	// Calculate original total prompt tokens (before any cache adjustments)
+	// Total = cache read + cache creation + uncached
+	originalPromptTokens := cacheReadTokens + cacheCreationTokens + uncachedTokens
 
 	// Calculate cache hit rate
+	// Hit rate = cache read tokens / (cache read tokens + uncached tokens)
+	// Note: cache creation tokens are excluded as they represent first-time caching
 	cacheHitRate := 0.0
-	if originalPromptTokens > 0 {
-		cacheHitRate = float64(cacheReadTokens) / float64(originalPromptTokens)
+	totalPromptTokens := cacheReadTokens + uncachedTokens
+	if totalPromptTokens > 0 {
+		cacheHitRate = float64(cacheReadTokens) / float64(totalPromptTokens)
 	}
 
 	// Calculate hypothetical cost without any caching (all tokens at 1.0x rate)

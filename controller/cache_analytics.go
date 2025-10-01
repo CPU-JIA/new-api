@@ -65,15 +65,36 @@ func GetCacheMetricsOverview(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"total_requests":          summary["total_requests"],
-			"cache_hit_rate":          summary["avg_cache_hit_rate"],
-			"total_cost_saved":        totalCostSaved,
-			"estimated_warmup_cost":   estimatedWarmupCost,
-			"net_savings":             netSavings,
-			"active_warmup_channels":  activeWarmupChannels,
-			"period":                  period,
-			"start_time":              startTime.Unix(),
-			"end_time":                endTime.Unix(),
+			"total_requests":         summary["total_requests"],
+			"cache_hit_rate":         summary["avg_cache_hit_rate"],
+			"active_warmup_channels": activeWarmupChannels,
+			"period":                 period,
+			"start_time":             startTime.Unix(),
+			"end_time":               endTime.Unix(),
+
+			// 🔥 Multi-unit support for cost_saved
+			"cost_saved_quota":  totalCostSaved,
+			"cost_saved_usd":    common.QuotaToUSD(totalCostSaved),
+			"cost_saved_cny":    common.QuotaToCNY(totalCostSaved),
+			"cost_saved_tokens": common.QuotaToTokens(totalCostSaved),
+
+			// 🔥 Multi-unit support for net_savings
+			"net_savings_quota":  netSavings,
+			"net_savings_usd":    common.QuotaToUSD(netSavings),
+			"net_savings_cny":    common.QuotaToCNY(netSavings),
+			"net_savings_tokens": common.QuotaToTokens(netSavings),
+
+			// 🔥 Warmup cost breakdown
+			"warmup_cost_quota":  estimatedWarmupCost,
+			"warmup_cost_usd":    common.QuotaToUSD(estimatedWarmupCost),
+			"warmup_cost_cny":    common.QuotaToCNY(estimatedWarmupCost),
+			"warmup_cost_tokens": common.QuotaToTokens(estimatedWarmupCost),
+
+			// 🔥 Unit conversion metadata
+			"conversion_rates": gin.H{
+				"quota_per_usd": common.QuotaPerUnit,
+				"usd_to_cny":    common.USDToCNYRate,
+			},
 		},
 	})
 }
@@ -159,6 +180,16 @@ func GetCacheMetricsChart(c *gin.Context) {
 		}
 		costSaved = append(costSaved, saved)
 
+		// 🔥 Add multi-unit cost data for chart
+		costSavedUSD := common.QuotaToUSD(saved)
+		costSavedCNY := common.QuotaToCNY(saved)
+		costSavedTokens := float64(common.QuotaToTokens(saved))
+
+		// Store in separate arrays (we'll add to response later)
+		_ = costSavedUSD
+		_ = costSavedCNY
+		_ = costSavedTokens
+
 		currentTime = bucketEnd
 	}
 
@@ -167,11 +198,42 @@ func GetCacheMetricsChart(c *gin.Context) {
 		"data": gin.H{
 			"timestamps":      timestamps,
 			"cache_hit_rates": cacheHitRates,
-			"cost_saved":      costSaved,
-			"period":          period,
-			"interval":        interval,
+
+			// 🔥 Multi-unit cost data
+			"cost_saved_quota":  costSaved,
+			"cost_saved_usd":    convertArrayToUSD(costSaved),
+			"cost_saved_cny":    convertArrayToCNY(costSaved),
+			"cost_saved_tokens": convertArrayToTokens(costSaved),
+
+			"period":            period,
+			"interval":          interval,
 		},
 	})
+}
+
+// Helper functions for array conversion
+func convertArrayToUSD(quotaArray []float64) []float64 {
+	result := make([]float64, len(quotaArray))
+	for i, quota := range quotaArray {
+		result[i] = common.QuotaToUSD(quota)
+	}
+	return result
+}
+
+func convertArrayToCNY(quotaArray []float64) []float64 {
+	result := make([]float64, len(quotaArray))
+	for i, quota := range quotaArray {
+		result[i] = common.QuotaToCNY(quota)
+	}
+	return result
+}
+
+func convertArrayToTokens(quotaArray []float64) []int {
+	result := make([]int, len(quotaArray))
+	for i, quota := range quotaArray {
+		result[i] = common.QuotaToTokens(quota)
+	}
+	return result
 }
 
 // GetCacheMetricsByChannels returns aggregated metrics grouped by channel
@@ -213,6 +275,8 @@ func GetCacheMetricsByChannels(c *gin.Context) {
 	warmerMetrics := service.GetCacheWarmerService().GetMetrics()
 	for i, cm := range channelMetrics {
 		channelId := cm["channel_id"].(int)
+
+		// Add warmup status
 		if wm, ok := warmerMetrics[channelId]; ok {
 			channelMetrics[i]["warmup_enabled"] = wm.WarmupEnabled
 			channelMetrics[i]["last_warmup"] = wm.LastWarmup.Unix()
@@ -222,6 +286,16 @@ func GetCacheMetricsByChannels(c *gin.Context) {
 			channelMetrics[i]["last_warmup"] = 0
 			channelMetrics[i]["request_count_5min"] = 0
 		}
+
+		// 🔥 Add multi-unit cost data for each channel
+		totalCostSaved := 0.0
+		if cost, ok := cm["total_cost_saved"].(float64); ok {
+			totalCostSaved = cost
+		}
+		channelMetrics[i]["cost_saved_quota"] = totalCostSaved
+		channelMetrics[i]["cost_saved_usd"] = common.QuotaToUSD(totalCostSaved)
+		channelMetrics[i]["cost_saved_cny"] = common.QuotaToCNY(totalCostSaved)
+		channelMetrics[i]["cost_saved_tokens"] = common.QuotaToTokens(totalCostSaved)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

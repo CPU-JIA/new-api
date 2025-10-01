@@ -38,6 +38,7 @@ const routerMap = {
   topup: '/console/topup',
   user: '/console/user',
   log: '/console/log',
+  cache: '/console/cache',
   midjourney: '/console/midjourney',
   setting: '/console/setting',
   about: '/about',
@@ -86,6 +87,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('使用日志'),
         itemKey: 'log',
         to: '/log',
+      },
+      {
+        text: t('缓存分析'),
+        itemKey: 'cache',
+        to: '/cache',
       },
       {
         text: t('绘图日志'),

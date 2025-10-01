@@ -71,6 +71,7 @@ import {
   Settings,
   CircleUser,
   Package,
+  Database,
 } from 'lucide-react';
 
 // 获取侧边栏Lucide图标组件
@@ -97,6 +98,8 @@ export function getLucideIcon(key, selected = false) {
       return <Key {...commonProps} color={iconColor} />;
     case 'log':
       return <BarChart3 {...commonProps} color={iconColor} />;
+    case 'cache':
+      return <Database {...commonProps} color={iconColor} />;
     case 'midjourney':
       return <ImageIcon {...commonProps} color={iconColor} />;
     case 'task':

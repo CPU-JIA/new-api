@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"one-api/common"
+	"one-api/constant"
 	"one-api/dto"
 	"one-api/model"
 	"sync"
@@ -247,9 +248,17 @@ func (cw *CacheWarmerService) doSendWarmup(metrics *ChannelCacheMetrics) error {
 		paddingContent = GetDefaultWarmupPadding()
 	}
 
+	// Use cheapest Claude model that supports caching for warmup
+	warmupModel := "claude-3-5-haiku-20241022"
+
+	// CRITICAL: Verify model supports caching before adding cache_control
+	if !constant.IsClaudeModelSupportCache(warmupModel) {
+		return fmt.Errorf("warmup model %s does not support prompt caching", warmupModel)
+	}
+
 	claudeRequest := dto.ClaudeRequest{
-		Model:     "claude-3-5-haiku-20241022", // Use cheapest model for warmup
-		MaxTokens: 1,                           // Minimal tokens
+		Model:     warmupModel,
+		MaxTokens: 1,        // Minimal tokens
 		Messages: []dto.ClaudeMessage{
 			{
 				Role:    "user",
@@ -258,7 +267,7 @@ func (cw *CacheWarmerService) doSendWarmup(metrics *ChannelCacheMetrics) error {
 		},
 	}
 
-	// Build system with cache control
+	// Build system with cache control (only if model supports it)
 	systemBlocks := []dto.ClaudeMediaMessage{
 		{
 			Type:         "text",
