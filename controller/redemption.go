@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func GetAllRedemptions(c *gin.Context) {
@@ -90,27 +91,32 @@ func AddRedemption(c *gin.Context) {
 		return
 	}
 	var keys []string
-	for i := 0; i < redemption.Count; i++ {
-		key := common.GetUUID()
-		cleanRedemption := model.Redemption{
-			UserId:      c.GetInt("id"),
-			Name:        redemption.Name,
-			Key:         key,
-			CreatedTime: common.GetTimestamp(),
-			Quota:       redemption.Quota,
-			ExpiredTime: redemption.ExpiredTime,
+	// 使用事务确保批量创建的原子性，避免部分成功导致数据不一致
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		for i := 0; i < redemption.Count; i++ {
+			key := common.GetUUID()
+			cleanRedemption := model.Redemption{
+				UserId:      c.GetInt("id"),
+				Name:        redemption.Name,
+				Key:         key,
+				CreatedTime: common.GetTimestamp(),
+				Quota:       redemption.Quota,
+				ExpiredTime: redemption.ExpiredTime,
+			}
+			if err := tx.Create(&cleanRedemption).Error; err != nil {
+				return err
+			}
+			keys = append(keys, key)
 		}
-		err = cleanRedemption.Insert()
-		if err != nil {
-			common.SysLog("Failed to insert redemption: " + err.Error())
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "创建兑换码失败，请稍后重试",
-				"data":    keys,
-			})
-			return
-		}
-		keys = append(keys, key)
+		return nil
+	})
+	if err != nil {
+		common.SysLog("Failed to create redemption batch: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "创建兑换码失败，请稍后重试",
+		})
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
