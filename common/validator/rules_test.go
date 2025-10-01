@@ -383,3 +383,40 @@ func Test_toInt(t *testing.T) {
 		})
 	}
 }
+
+func TestPasswordComplexityRule(t *testing.T) {
+	rule := &PasswordComplexityRule{}
+
+	tests := []struct {
+		name        string
+		value       interface{}
+		expectError bool
+		errorMsg    string
+	}{
+		{"Valid password with all requirements", "Abc123", false, ""},
+		{"Valid complex password", "Test1234Pass", false, ""},
+		{"Valid minimal password", "Aa1", false, ""},
+		{"Missing lowercase letter", "ABC123", true, "must contain at least one lowercase letter"},
+		{"Missing uppercase letter", "abc123", true, "must contain at least one uppercase letter"},
+		{"Missing digit", "Abcdef", true, "must contain at least one number"},
+		{"Only lowercase and uppercase", "AbcDef", true, "must contain at least one number"},
+		{"Only lowercase and digits", "abc123", true, "must contain at least one uppercase letter"},
+		{"Only uppercase and digits", "ABC123", true, "must contain at least one lowercase letter"},
+		{"Empty string", "", false, ""}, // Empty values allowed unless required
+		{"Nil value", nil, false, ""},   // Nil values allowed unless required
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := rule.Validate(tt.value, "password")
+			if tt.expectError {
+				assert.Error(t, err)
+				if tt.errorMsg != "" {
+					assert.Contains(t, err.Error(), tt.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
