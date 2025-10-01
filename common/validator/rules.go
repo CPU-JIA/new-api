@@ -263,6 +263,55 @@ func (r *BoolRule) Validate(value interface{}, fieldName string) error {
 	return nil
 }
 
+// PasswordComplexityRule validates password complexity requirements
+// Password must contain at least:
+// - One lowercase letter [a-z]
+// - One uppercase letter [A-Z]
+// - One digit [0-9]
+type PasswordComplexityRule struct{}
+
+func (r *PasswordComplexityRule) Validate(value interface{}, fieldName string) error {
+	str := toString(value)
+	if str == "" && isEmpty(value) {
+		return nil // Empty values are allowed unless required rule is also specified
+	}
+
+	// Check for at least one lowercase letter
+	hasLower, _ := regexp.MatchString(`[a-z]`, str)
+	if !hasLower {
+		return &ValidationError{
+			Field:   fieldName,
+			Value:   value,
+			Rule:    "password_complexity",
+			Message: "password must contain at least one lowercase letter",
+		}
+	}
+
+	// Check for at least one uppercase letter
+	hasUpper, _ := regexp.MatchString(`[A-Z]`, str)
+	if !hasUpper {
+		return &ValidationError{
+			Field:   fieldName,
+			Value:   value,
+			Rule:    "password_complexity",
+			Message: "password must contain at least one uppercase letter",
+		}
+	}
+
+	// Check for at least one digit
+	hasDigit, _ := regexp.MatchString(`\d`, str)
+	if !hasDigit {
+		return &ValidationError{
+			Field:   fieldName,
+			Value:   value,
+			Rule:    "password_complexity",
+			Message: "password must contain at least one number",
+		}
+	}
+
+	return nil
+}
+
 // Helper functions
 
 // isEmpty checks if a value is considered empty

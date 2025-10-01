@@ -183,6 +183,8 @@ func (v *Validator) validateField(value interface{}, fieldName, tag string) erro
 			rule = &URLRule{}
 		case "email":
 			rule = &EmailRule{}
+		case "password_complexity":
+			rule = &PasswordComplexityRule{}
 		case "oneof":
 			values := strings.Split(ruleParam, " ")
 			rule = &OneOfRule{Values: values}
