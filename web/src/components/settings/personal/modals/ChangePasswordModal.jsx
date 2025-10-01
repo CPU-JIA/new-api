@@ -71,7 +71,7 @@ const ChangePasswordModal = ({
           </Typography.Text>
           <Input
             name='set_new_password'
-            placeholder={t('请输入新密码')}
+            placeholder={t('请输入新密码（至少8位，需包含大小写字母和数字）')}
             type='password'
             value={inputs.set_new_password}
             onChange={(value) => handleInputChange('set_new_password', value)}
@@ -79,6 +79,9 @@ const ChangePasswordModal = ({
             className='!rounded-lg'
             prefix={<IconLock />}
           />
+          <Typography.Text type='tertiary' size='small' className='block mt-1'>
+            {t('密码需包含：大写字母、小写字母、数字')}
+          </Typography.Text>
         </div>
 
         <div>

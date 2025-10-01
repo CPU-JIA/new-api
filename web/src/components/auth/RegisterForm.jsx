@@ -453,11 +453,16 @@ const RegisterForm = () => {
                 <Form.Input
                   field='password'
                   label={t('密码')}
-                  placeholder={t('输入密码，最短 8 位，最长 20 位')}
+                  placeholder={t('输入密码，至少8位，需包含大小写字母和数字')}
                   name='password'
                   mode='password'
                   onChange={(value) => handleChange('password', value)}
                   prefix={<IconLock />}
+                  extraText={
+                    <Text type='tertiary' size='small'>
+                      {t('密码需包含：大写字母、小写字母、数字')}
+                    </Text>
+                  }
                 />
 
                 <Form.Input
