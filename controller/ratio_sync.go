@@ -54,7 +54,8 @@ type upstreamResult struct {
 func FetchUpstreamRatios(c *gin.Context) {
 	var req dto.UpstreamRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		logger.LogError(c.Request.Context(), "Failed to bind JSON request: "+err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "请求参数格式错误"})
 		return
 	}
 
@@ -505,9 +506,10 @@ func buildDifferences(localData map[string]any, successfulChannels []struct {
 func GetSyncableChannels(c *gin.Context) {
 	channels, err := model.GetAllChannels(0, 0, true, false)
 	if err != nil {
+		logger.LogError(c.Request.Context(), "Failed to get all channels: "+err.Error())
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
-			"message": err.Error(),
+			"message": "获取渠道列表失败，请稍后重试",
 		})
 		return
 	}

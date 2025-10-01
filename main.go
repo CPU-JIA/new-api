@@ -130,11 +130,15 @@ func main() {
 	// Initialize HTTP server
 	server := gin.New()
 	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
+		// Log detailed panic information for debugging
 		common.SysLog(fmt.Sprintf("panic detected: %v", err))
+		common.SysLog(fmt.Sprintf("Please submit an issue: https://github.com/Calcium-Ion/new-api"))
+
+		// Return generic error message to client (security best practice)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": gin.H{
-				"message": fmt.Sprintf("Panic detected, error: %v. Please submit a issue here: https://github.com/Calcium-Ion/new-api", err),
-				"type":    "new_api_panic",
+				"message": "An internal server error occurred. Please try again later or contact support.",
+				"type":    "server_error",
 			},
 		})
 	}))

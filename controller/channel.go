@@ -83,7 +83,8 @@ func GetAllChannels(c *gin.Context) {
 	if enableTagMode {
 		tags, err := model.GetPaginatedTags(pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+			common.SysLog("Failed to get paginated tags: " + err.Error())
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取标签失败，请稍后重试"})
 			return
 		}
 		for _, tag := range tags {
@@ -130,7 +131,8 @@ func GetAllChannels(c *gin.Context) {
 
 		err := baseQuery.Order(order).Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("key").Find(&channelData).Error
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+			common.SysLog("Failed to query channels: " + err.Error())
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "查询渠道失败，请稍后重试"})
 			return
 		}
 	}
@@ -1077,7 +1079,8 @@ func CopyChannel(c *gin.Context) {
 	// fetch original channel with key
 	origin, err := model.GetChannelById(id, true)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		common.SysLog("Failed to get channel by ID for cloning: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取渠道信息失败，请稍后重试"})
 		return
 	}
 
@@ -1095,7 +1098,8 @@ func CopyChannel(c *gin.Context) {
 
 	// insert
 	if err := model.BatchInsertChannels([]model.Channel{clone}); err != nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		common.SysLog("Failed to insert cloned channel: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "克隆渠道失败，请稍后重试"})
 		return
 	}
 	model.InitChannelCache()

@@ -257,7 +257,8 @@ func SyncUpstreamModels(c *gin.Context) {
 	// 1) 获取未配置模型列表
 	missing, err := model.GetMissingModels()
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		common.SysLog("Failed to get missing models: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取模型配置失败，请稍后重试"})
 		return
 	}
 	if len(missing) == 0 {
