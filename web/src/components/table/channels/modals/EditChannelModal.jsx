@@ -163,6 +163,11 @@ const EditChannelModal = (props) => {
     system_prompt: '',
     system_prompt_override: false,
     settings: '',
+    // Pool Cache Optimization settings
+    enable_pool_cache_optimization: false,
+    cache_ttl: '5m',
+    enable_smart_warmup: false,
+    warmup_threshold: 10,
     // 仅 Vertex: 密钥格式（存入 settings.vertex_key_type）
     vertex_key_type: 'json',
     // 企业账户设置
@@ -238,6 +243,10 @@ const EditChannelModal = (props) => {
     proxy: '',
     pass_through_body_enabled: false,
     system_prompt: '',
+    enable_pool_cache_optimization: false,
+    cache_ttl: '5m',
+    enable_smart_warmup: false,
+    warmup_threshold: 10,
   });
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
@@ -416,6 +425,13 @@ const EditChannelModal = (props) => {
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
+          // Pool Cache Optimization settings
+          data.enable_pool_cache_optimization =
+            parsedSettings.enable_pool_cache_optimization || false;
+          data.cache_ttl = parsedSettings.cache_ttl || '5m';
+          data.enable_smart_warmup =
+            parsedSettings.enable_smart_warmup || false;
+          data.warmup_threshold = parsedSettings.warmup_threshold || 10;
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -424,6 +440,10 @@ const EditChannelModal = (props) => {
           data.pass_through_body_enabled = false;
           data.system_prompt = '';
           data.system_prompt_override = false;
+          data.enable_pool_cache_optimization = false;
+          data.cache_ttl = '5m';
+          data.enable_smart_warmup = false;
+          data.warmup_threshold = 10;
         }
       } else {
         data.force_format = false;
@@ -432,6 +452,10 @@ const EditChannelModal = (props) => {
         data.pass_through_body_enabled = false;
         data.system_prompt = '';
         data.system_prompt_override = false;
+        data.enable_pool_cache_optimization = false;
+        data.cache_ttl = '5m';
+        data.enable_smart_warmup = false;
+        data.warmup_threshold = 10;
       }
 
       if (data.settings) {
@@ -484,6 +508,10 @@ const EditChannelModal = (props) => {
         pass_through_body_enabled: data.pass_through_body_enabled,
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
+        enable_pool_cache_optimization: data.enable_pool_cache_optimization,
+        cache_ttl: data.cache_ttl,
+        enable_smart_warmup: data.enable_smart_warmup,
+        warmup_threshold: data.warmup_threshold,
       });
       // console.log(data);
     } else {
@@ -898,6 +926,10 @@ const EditChannelModal = (props) => {
       pass_through_body_enabled: localInputs.pass_through_body_enabled || false,
       system_prompt: localInputs.system_prompt || '',
       system_prompt_override: localInputs.system_prompt_override || false,
+      enable_pool_cache_optimization: localInputs.enable_pool_cache_optimization || false,
+      cache_ttl: localInputs.cache_ttl || '5m',
+      enable_smart_warmup: localInputs.enable_smart_warmup || false,
+      warmup_threshold: localInputs.warmup_threshold || 10,
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
@@ -2488,6 +2520,100 @@ const EditChannelModal = (props) => {
                       '如果用户请求中包含系统提示词，则使用此设置拼接到用户的系统提示词前面',
                     )}
                   />
+                </Card>
+
+                {/* Cache Optimization Card */}
+                <Card className='!rounded-2xl shadow-sm border-0 mb-6'>
+                  {/* Header: Cache Optimization */}
+                  <div className='flex items-center mb-2'>
+                    <Avatar
+                      size='small'
+                      color='cyan'
+                      className='mr-2 shadow-md'
+                    >
+                      <IconBolt size={16} />
+                    </Avatar>
+                    <div>
+                      <Text className='text-lg font-medium'>
+                        {t('缓存优化')}
+                      </Text>
+                      <div className='text-xs text-gray-600'>
+                        {t('Claude Prompt Caching 配置（仅Claude渠道）')}
+                      </div>
+                    </div>
+                  </div>
+
+                  <Form.Switch
+                    field='enable_pool_cache_optimization'
+                    label={t('启用池化缓存优化')}
+                    checkedText={t('开')}
+                    uncheckedText={t('关')}
+                    onChange={(value) => {
+                      handleChannelSettingsChange('enable_pool_cache_optimization', value);
+                      // 如果关闭主开关，同时关闭依赖项
+                      if (!value) {
+                        handleChannelSettingsChange('enable_smart_warmup', false);
+                      }
+                    }}
+                    extraText={t(
+                      '为Claude API添加共享padding内容，提升缓存命中率，降低token成本',
+                    )}
+                  />
+
+                  {inputs.enable_pool_cache_optimization && (
+                    <>
+                      <Form.Select
+                        field='cache_ttl'
+                        label={t('缓存TTL')}
+                        placeholder={t('选择缓存生存时间')}
+                        optionList={[
+                          { label: '5分钟（标准）', value: '5m' },
+                          { label: '1小时（长期）', value: '1h' },
+                        ]}
+                        style={{ width: '100%' }}
+                        onChange={(value) =>
+                          handleChannelSettingsChange('cache_ttl', value)
+                        }
+                        extraText={t(
+                          '5m适合快速变化的场景；1h适合稳定内容，成本更高',
+                        )}
+                      />
+
+                      <Form.Switch
+                        field='enable_smart_warmup'
+                        label={t('启用智能预热')}
+                        checkedText={t('开')}
+                        uncheckedText={t('关')}
+                        onChange={(value) => {
+                          handleChannelSettingsChange('enable_smart_warmup', value);
+                          // 如果关闭预热，重置阈值为默认值
+                          if (!value) {
+                            handleChannelSettingsChange('warmup_threshold', 10);
+                          }
+                        }}
+                        extraText={t(
+                          '自动发送预热请求保持缓存活跃，避免冷启动',
+                        )}
+                      />
+
+                      {inputs.enable_smart_warmup && (
+                        <Form.InputNumber
+                          field='warmup_threshold'
+                          label={t('预热启动阈值')}
+                          placeholder={t('请输入阈值')}
+                          min={5}
+                          max={100}
+                          onNumberChange={(value) =>
+                            handleChannelSettingsChange('warmup_threshold', value)
+                          }
+                          style={{ width: '100%' }}
+                          extraText={t(
+                            '当5分钟内请求数达到此阈值时，自动启动预热（默认10）',
+                          )}
+                        />
+                      )}
+                    </>
+                  )}
                 </Card>
               </div>
             </Spin>

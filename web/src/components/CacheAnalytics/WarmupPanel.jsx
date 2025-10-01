@@ -86,6 +86,25 @@ const WarmupPanel = ({ warmupStatus, loading, t }) => {
       },
     },
     {
+      title: t('缓存TTL'),
+      dataIndex: 'ttl',
+      key: 'ttl',
+      width: 100,
+      filters: [
+        { text: '5分钟', value: '5m' },
+        { text: '1小时', value: '1h' },
+      ],
+      onFilter: (value, record) => record.ttl === value,
+      render: (ttl) => {
+        if (!ttl) {
+          return <Tag color='grey'>未配置</Tag>;
+        }
+        const color = ttl === '1h' ? 'purple' : 'blue';
+        const label = ttl === '1h' ? '1小时' : '5分钟';
+        return <Tag color={color}>{label}</Tag>;
+      },
+    },
+    {
       title: t('5分钟请求数'),
       dataIndex: 'request_count_5min',
       key: 'request_count_5min',
@@ -96,6 +115,27 @@ const WarmupPanel = ({ warmupStatus, loading, t }) => {
         return (
           <Tag color={color} size='large'>
             {count || 0}
+          </Tag>
+        );
+      },
+    },
+    {
+      title: t('预热次数'),
+      dataIndex: 'warmup_count',
+      key: 'warmup_count',
+      width: 110,
+      sorter: (a, b) => (a.warmup_count || 0) - (b.warmup_count || 0),
+      render: (count) => {
+        const numCount = count || 0;
+        let color = 'grey';
+        if (numCount > 10) {
+          color = 'green';
+        } else if (numCount > 0) {
+          color = 'amber';
+        }
+        return (
+          <Tag color={color} size='large'>
+            {numCount}
           </Tag>
         );
       },
@@ -165,6 +205,45 @@ const WarmupPanel = ({ warmupStatus, loading, t }) => {
                 minute: 'numeric',
               })}
             </Text>
+          );
+        }
+      },
+    },
+    {
+      title: t('ROI状态'),
+      dataIndex: 'consecutive_low_roi',
+      key: 'consecutive_low_roi',
+      width: 120,
+      filters: [
+        { text: '良好', value: 0 },
+        { text: '监控中', value: 1 },
+        { text: '风险', value: 2 },
+      ],
+      onFilter: (value, record) => {
+        const roi = record.consecutive_low_roi || 0;
+        if (value === 0) return roi === 0;
+        if (value === 1) return roi === 1 || roi === 2;
+        if (value === 2) return roi >= 3;
+        return false;
+      },
+      render: (consecutiveLowROI, record) => {
+        const roi = consecutiveLowROI || 0;
+        if (!record.warmup_enabled) {
+          return <Tag color='grey'>未启用</Tag>;
+        }
+        if (roi === 0) {
+          return <Tag color='green'>良好</Tag>;
+        } else if (roi >= 3) {
+          return (
+            <Tag color='red'>
+              已禁用
+            </Tag>
+          );
+        } else {
+          return (
+            <Tag color='amber'>
+              监控中({roi}/3)
+            </Tag>
           );
         }
       },
