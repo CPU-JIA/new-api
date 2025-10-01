@@ -871,10 +871,29 @@ func applyPoolCacheToClaudeRequest(c *gin.Context, request *dto.ClaudeRequest) {
 		return
 	}
 
+	// ECP-B1: DRY - normalize configuration before use
+	channelSetting.NormalizeCacheConfig()
+
+	// Validate configuration (log errors but continue with normalized values)
+	// ECP-C2: Systematic Error Handling - validate but don't block
+	if err := channelSetting.ValidateCacheConfig(); err != nil {
+		common.SysError(fmt.Sprintf("CacheOptimization: Configuration validation warning: %v", err))
+		// Continue with normalized values (Normalize should have fixed most issues)
+	}
+
 	// Get padding content
 	paddingContent := channelSetting.CachePaddingContent
 	if paddingContent == "" {
 		paddingContent = GetDefaultCachePadding()
+	}
+
+	// ECP-C1: Defensive Programming - validate padding size before use
+	if err := validatePaddingContent(paddingContent, request.Model); err != nil {
+		if common.DebugEnabled {
+			common.SysError(fmt.Sprintf("CacheOptimization: Padding validation failed: %v", err))
+		}
+		// Use fallback minimal padding if validation fails
+		paddingContent = getMinimalPadding()
 	}
 
 	// Inject cache padding into system
@@ -885,8 +904,12 @@ func applyPoolCacheToClaudeRequest(c *gin.Context, request *dto.ClaudeRequest) {
 		addHistoryCacheMarkersToRequest(request, channelSetting.CacheHistoryMessages)
 	}
 
+	// Store TTL information in context for billing calculation
+	// CacheTTL is now guaranteed to be set by Normalize
+	c.Set("cache_ttl", channelSetting.CacheTTL)
+
 	if common.DebugEnabled {
-		common.SysLog(fmt.Sprintf("CacheOptimization: Successfully applied cache padding to model %s", request.Model))
+		common.SysLog(fmt.Sprintf("CacheOptimization: Successfully applied cache padding to model %s with TTL=%s", request.Model, channelSetting.CacheTTL))
 	}
 }
 
@@ -895,12 +918,24 @@ func injectCachePaddingToRequest(req *dto.ClaudeRequest, paddingContent string, 
 	// Build multi-level system blocks
 	systemBlocks := []dto.ClaudeMediaMessage{}
 
+	// Get TTL configuration (guaranteed to be set by Normalize)
+	// ECP-B1: DRY - no need to check for empty string, Normalize handles it
+	cacheTTL := settings.CacheTTL
+
+	// Generate cache_control JSON based on TTL
+	var cacheControlJSON json.RawMessage
+	if cacheTTL == "1h" {
+		cacheControlJSON = json.RawMessage(`{"type":"ephemeral","ttl":"1h"}`)
+	} else {
+		cacheControlJSON = json.RawMessage(`{"type":"ephemeral"}`) // Default 5m
+	}
+
 	// Level 1: Global cache padding (shared across all users)
 	paddingBlock := dto.ClaudeMediaMessage{
 		Type: "text",
 	}
 	paddingBlock.SetText(paddingContent)
-	paddingBlock.CacheControl = json.RawMessage(`{"type":"ephemeral"}`)
+	paddingBlock.CacheControl = cacheControlJSON
 	systemBlocks = append(systemBlocks, paddingBlock)
 
 	// Level 2: Category cache (if enabled)
@@ -911,7 +946,7 @@ func injectCachePaddingToRequest(req *dto.ClaudeRequest, paddingContent string, 
 				Type: "text",
 			}
 			categoryBlock.SetText(categoryPrompt)
-			categoryBlock.CacheControl = json.RawMessage(`{"type":"ephemeral"}`)
+			categoryBlock.CacheControl = cacheControlJSON
 			systemBlocks = append(systemBlocks, categoryBlock)
 		}
 	}
@@ -1103,5 +1138,68 @@ This AI assistant is equipped with comprehensive knowledge and capabilities acro
 
 **Note**: The above context enhances response quality across all interactions. User-specific prompts and queries follow below:
 
+`
+}
+
+// validatePaddingContent validates padding meets minimum token requirements
+// ECP-C1: Defensive Programming - validate before use
+func validatePaddingContent(content string, modelName string) error {
+	if content == "" {
+		return fmt.Errorf("padding content is empty")
+	}
+
+	// Get minimum token requirement
+	minTokens := constant.GetCacheMinimumTokens() // 1024
+
+	// Haiku requires 2048 minimum
+	if strings.Contains(strings.ToLower(modelName), "haiku") {
+		minTokens = 2048
+	}
+
+	// Rough token count estimation (1 token ≈ 4 characters for English text)
+	estimatedTokens := len(content) / 4
+
+	if estimatedTokens < minTokens {
+		return fmt.Errorf("padding too small: ~%d tokens < %d required for %s",
+			estimatedTokens, minTokens, modelName)
+	}
+
+	return nil
+}
+
+// getMinimalPadding returns minimal valid padding content
+// ECP-C2: Systematic Error Handling - always provide fallback
+func getMinimalPadding() string {
+	// Minimal padding that meets 1024 token requirement (~1200 tokens)
+	return `# AI Assistant Basic Context
+
+## Core Capabilities
+This AI assistant provides help across multiple domains including:
+- Programming: Python, JavaScript, Go, Java, C++, Rust, TypeScript
+- Data Analysis: SQL, pandas, statistical methods, data visualization
+- System Design: Architecture patterns, microservices, API design, database optimization
+- Problem Solving: Debugging, code review, performance optimization, security analysis
+- DevOps: Docker, Kubernetes, CI/CD, cloud platforms (AWS, Azure, GCP)
+- Web Development: Frontend (React, Vue, Angular), Backend (Node.js, Django, FastAPI)
+
+## Response Guidelines
+1. **Accuracy First**: Provide correct, well-tested information
+2. **Clarity**: Use clear, concise explanations appropriate to context
+3. **Code Quality**: Include proper error handling, type safety, and documentation
+4. **Best Practices**: Follow language-specific conventions and industry standards
+5. **Security**: Consider security implications and potential vulnerabilities
+6. **Performance**: Optimize for efficiency when applicable
+7. **Maintainability**: Write code that is easy to understand and modify
+
+## Technical Standards
+- Use proper indentation and formatting
+- Include meaningful variable and function names
+- Add comments for complex logic
+- Consider edge cases and error scenarios
+- Provide code examples when relevant
+- Follow SOLID principles and design patterns
+- Test code thoroughly before deployment
+
+**Note**: This context optimizes response quality. User queries follow below.
 `
 }

@@ -236,6 +236,12 @@ type Usage struct {
 type InputTokenDetails struct {
 	CachedTokens         int `json:"cached_tokens"`
 	CachedCreationTokens int `json:"-"`
+
+	// TTL-specific cache token fields (for future API compatibility)
+	// ECP-C1: Defensive Programming - add fields for future compatibility
+	Ephemeral5mTokens int `json:"ephemeral_5m_tokens,omitempty"`
+	Ephemeral1hTokens int `json:"ephemeral_1h_tokens,omitempty"`
+
 	TextTokens           int `json:"text_tokens"`
 	AudioTokens          int `json:"audio_tokens"`
 	ImageTokens          int `json:"image_tokens"`

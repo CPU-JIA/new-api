@@ -22,6 +22,7 @@ New API is a next-generation AI model gateway and asset management system built 
   for /f %i in ('git describe --tags') do set VERSION=%i
   go build -ldflags "-s -w -X one-api/common.Version=%VERSION%" -o new-api.exe
   ```
+- **Build with make**: `make build` (Linux/Mac output: `new-api`, Windows: adjust to `new-api.exe` manually)
 - **Full build (frontend + backend)**: `make all` (requires Make for Windows)
 - **Clean build artifacts**: `make clean` or manually delete files
 
@@ -95,6 +96,11 @@ New API is a next-generation AI model gateway and asset management system built 
 - **Load Balancing** - Weighted random channel selection
 - **Channel Retry** - Configurable retry logic with caching support
 
+### Supported AI Providers (40+)
+- **International**: OpenAI, Claude (Anthropic), Gemini (Google), AWS Bedrock, Azure OpenAI, Vertex AI, Cohere, Mistral, Perplexity, OpenRouter, Cloudflare, Ollama, XAI
+- **Chinese Providers**: Baidu (Wenxin/文心, v1/v2), Tencent (Hunyuan/混元), Alibaba (Qwen/通义千问), Volcengine (Doubao/豆包), Zhipu (智谱), Moonshot (Kimi/月之暗面), DeepSeek, Minimax, Lingyi Wanwu (01.AI/零一万物), AI360, SiliconFlow, Mokaai, Xinference, Xunfei (讯飞), Coze (扣子), Dify, Jina
+- **Task-Based Providers**: Jimeng (即梦, image generation), Suno (music generation), Kling (可灵, video generation), Vidu (video generation)
+
 ### Authentication & Authorization
 - Multiple login methods: Traditional, LinuxDO, Telegram, OIDC
 - JWT-based session management
@@ -135,6 +141,7 @@ Key environment variables (see `.env.example` for full list):
 - **`DEBUG`** - Enable debug mode
 - **`ENABLE_PPROF`** - Enable pprof profiling
 - **`ERROR_LOG_ENABLED`** - Record and display error logs (default: false)
+- **`CHANNEL_UPDATE_FREQUENCY`** - Auto-update channel status frequency in seconds (optional)
 
 ### Feature Flags
 - **`GENERATE_DEFAULT_TOKEN`** - Generate initial token for new users (default: false)
@@ -151,6 +158,13 @@ The `constant/` package has **strict dependency rules** (see `constant/README.md
 - **No business logic or external package dependencies**
 - **Constants only** - no functions, no complex logic
 - Violating this will cause circular dependencies and break the build
+
+### Debugging & Profiling
+- **Enable pprof**: Set `ENABLE_PPROF=true` and access profiling at `http://localhost:PORT/debug/pprof/`
+- **Debug mode**: Set `DEBUG=true` or `GIN_MODE=debug` for verbose logging
+- **Channel testing**: Use the channel test endpoint (`controller/channel-test.go`) to verify specific channel configurations
+- **Goroutine pool**: Application uses `github.com/bytedance/gopkg/util/gopool` for concurrent task management
+- **Error logs**: Enable with `ERROR_LOG_ENABLED=true` to record and display detailed error information
 
 ### Code Style
 - **Backend**: Follow Go conventions (gofmt, go vet), use golangci-lint
@@ -201,6 +215,15 @@ The `constant/` package has **strict dependency rules** (see `constant/README.md
 - Sync frequency controlled by `SYNC_FREQUENCY`
 - Cache initialization with panic recovery and retry in `main.go`
 - Weighted random selection for load balancing
+
+### Background Services
+On startup, the application launches several background goroutines (see `main.go:70-100`):
+- **Channel cache sync** (`model.SyncChannelCache`) - Periodic refresh of channel data based on `SYNC_FREQUENCY`
+- **Options sync** (`model.SyncOptions`) - Configuration hot-reload for dynamic settings updates
+- **Quota data updates** (`model.UpdateQuotaData`) - Dashboard statistics refresh for analytics
+- **Channel auto-update** (`controller.AutomaticallyUpdateChannels`) - Optional automated channel status checks (requires `CHANNEL_UPDATE_FREQUENCY` env var)
+
+All background tasks use goroutine pool (`gopool`) for efficient concurrent execution.
 
 ### Request Flow
 1. Request arrives at `router/` layer

@@ -252,23 +252,60 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 	cacheCreationRatio := relayInfo.PriceData.CacheCreationRatio
 	cacheCreationTokens := usage.PromptTokensDetails.CachedCreationTokens
 
+	// ECP-C1: Defensive Programming - handle 1h TTL billing with fallback mechanism
+	// Check if usage contains TTL-specific fields (future API compatibility)
+	cache5mTokens := 0
+	cache1hTokens := 0
+
+	// Try to get TTL-specific token counts from usage (if API returns them)
+	// This is for future compatibility when Claude API adds these fields
+	if usage.PromptTokensDetails.Ephemeral5mTokens > 0 {
+		cache5mTokens = usage.PromptTokensDetails.Ephemeral5mTokens
+	}
+	if usage.PromptTokensDetails.Ephemeral1hTokens > 0 {
+		cache1hTokens = usage.PromptTokensDetails.Ephemeral1hTokens
+	}
+
+	// If no TTL-specific fields, use context CacheTTL to determine billing ratio
+	if cache5mTokens == 0 && cache1hTokens == 0 && cacheCreationTokens > 0 {
+		if relayInfo.CacheTTL == "1h" {
+			// 1-hour TTL: use 2x ratio
+			cache1hTokens = cacheCreationTokens
+			cacheCreationTokens = 0 // Don't double-count
+		} else {
+			// 5-minute TTL (default): use 1.25x ratio
+			cache5mTokens = cacheCreationTokens
+			cacheCreationTokens = 0 // Don't double-count
+		}
+	}
+
 	if relayInfo.ChannelType == constant.ChannelTypeOpenRouter {
 		promptTokens -= cacheTokens
 		isUsingCustomSettings := relayInfo.PriceData.UsePrice || hasCustomModelRatio(modelName, relayInfo.PriceData.ModelRatio)
-		if cacheCreationTokens == 0 && relayInfo.PriceData.CacheCreationRatio != 1 && usage.Cost != 0 && !isUsingCustomSettings {
+		if cacheCreationTokens == 0 && cache5mTokens == 0 && cache1hTokens == 0 && relayInfo.PriceData.CacheCreationRatio != 1 && usage.Cost != 0 && !isUsingCustomSettings {
 			maybeCacheCreationTokens := CalcOpenRouterCacheCreateTokens(*usage, relayInfo.PriceData)
 			if maybeCacheCreationTokens >= 0 && promptTokens >= maybeCacheCreationTokens {
 				cacheCreationTokens = maybeCacheCreationTokens
 			}
 		}
 		promptTokens -= cacheCreationTokens
+		promptTokens -= cache5mTokens
+		promptTokens -= cache1hTokens
 	}
 
 	calculateQuota := 0.0
 	if !relayInfo.PriceData.UsePrice {
 		calculateQuota = float64(promptTokens)
 		calculateQuota += float64(cacheTokens) * cacheRatio
+
+		// ECP-B2: KISS - apply correct ratio based on TTL
+		// Legacy field (fallback for old API or non-TTL scenarios)
 		calculateQuota += float64(cacheCreationTokens) * cacheCreationRatio
+
+		// TTL-specific billing (5m = 1.25x, 1h = 2x)
+		calculateQuota += float64(cache5mTokens) * 1.25
+		calculateQuota += float64(cache1hTokens) * 2.0
+
 		calculateQuota += float64(completionTokens) * completionRatio
 		calculateQuota = calculateQuota * groupRatio * modelRatio
 	} else {

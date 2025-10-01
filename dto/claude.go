@@ -505,6 +505,12 @@ type ClaudeUsage struct {
 	CacheCreationInputTokens int                  `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int                  `json:"cache_read_input_tokens"`
 	OutputTokens             int                  `json:"output_tokens"`
+
+	// TTL-specific token fields (may not be present in current API version)
+	// ECP-C1: Defensive Programming - add fields for future API compatibility
+	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens,omitempty"`
+	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens,omitempty"`
+
 	ServerToolUse            *ClaudeServerToolUse `json:"server_tool_use,omitempty"`
 }
 

@@ -152,8 +152,8 @@ func main() {
 		Path:     "/",
 		MaxAge:   2592000, // 30 days
 		HttpOnly: true,
-		Secure:   os.Getenv("DEBUG") != "true", // Force HTTPS in non-debug mode
-		SameSite: http.SameSiteStrictMode,
+		Secure:   os.Getenv("HTTPS_ENABLED") == "true", // Only enable Secure flag when explicitly using HTTPS
+		SameSite: http.SameSiteLaxMode,                 // Lax mode: allows same-site navigation while protecting against CSRF
 	})
 	server.Use(sessions.Sessions("session", store))
 

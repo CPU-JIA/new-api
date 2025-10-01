@@ -243,6 +243,9 @@ func SetApiRouter(router *gin.Engine) {
 			// Overview metrics
 			cacheRoute.GET("/metrics/overview", controller.GetCacheMetricsOverview)
 
+			// Comprehensive performance analysis with ROI metrics
+			cacheRoute.GET("/performance", controller.GetCachePerformanceAnalysis)
+
 			// Time-series chart data
 			cacheRoute.GET("/metrics/chart", controller.GetCacheMetricsChart)
 

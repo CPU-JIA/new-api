@@ -148,3 +148,138 @@ func GetPromptCacheMetricsByChannelGrouped(startTime, endTime time.Time) ([]map[
 func InsertPromptCacheMetrics(metric *PromptCacheMetrics) error {
 	return DB.Create(metric).Error
 }
+
+// GetWarmupCost retrieves the actual cost of warmup requests within a time range
+// ECP-C2: Systematic Error Handling - return error for proper handling
+func GetWarmupCost(startTime, endTime time.Time) (float64, error) {
+	var result struct {
+		TotalWarmupCost float64
+	}
+
+	err := DB.Model(&PromptCacheMetrics{}).
+		Select("SUM(cost_with_cache) as total_warmup_cost").
+		Where("created_at >= ? AND created_at <= ? AND is_warmup = ?", startTime, endTime, true).
+		Scan(&result).Error
+
+	if err != nil {
+		return 0, err
+	}
+
+	return result.TotalWarmupCost, nil
+}
+
+// GetCacheROIMetrics calculates comprehensive ROI metrics for cache performance
+// ECP-C3: Performance Awareness - optimize query with single aggregation
+func GetCacheROIMetrics(startTime, endTime time.Time) (map[string]interface{}, error) {
+	var userResult struct {
+		TotalRequests       int64
+		TotalCostSaved      float64
+		TotalCostWithCache  float64
+		TotalCostWithout    float64
+		AvgCacheHitRate     float64
+		TotalCacheReadTokens int64
+		TotalPromptTokens   int64
+	}
+
+	// Get user request metrics (exclude warmup)
+	err := DB.Model(&PromptCacheMetrics{}).
+		Select(`
+			COUNT(*) as total_requests,
+			SUM(cost_saved) as total_cost_saved,
+			SUM(cost_with_cache) as total_cost_with_cache,
+			SUM(cost_without_cache) as total_cost_without,
+			AVG(cache_hit_rate) as avg_cache_hit_rate,
+			SUM(cache_read_tokens) as total_cache_read_tokens,
+			SUM(prompt_tokens) as total_prompt_tokens
+		`).
+		Where("created_at >= ? AND created_at <= ? AND is_warmup = ?", startTime, endTime, false).
+		Scan(&userResult).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Get warmup cost
+	warmupCost, err := GetWarmupCost(startTime, endTime)
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate net savings and ROI
+	netSavings := userResult.TotalCostSaved - warmupCost
+	roi := 0.0
+	if warmupCost > 0 {
+		roi = (userResult.TotalCostSaved / warmupCost) - 1 // ROI as percentage
+	}
+
+	// Calculate break-even analysis
+	breakEvenPoint := 0.0
+	if userResult.TotalRequests > 0 {
+		breakEvenPoint = warmupCost / float64(userResult.TotalRequests)
+	}
+
+	return map[string]interface{}{
+		// User request metrics
+		"total_requests":         userResult.TotalRequests,
+		"total_cost_saved":       userResult.TotalCostSaved,
+		"total_cost_with_cache":  userResult.TotalCostWithCache,
+		"total_cost_without":     userResult.TotalCostWithout,
+		"avg_cache_hit_rate":     userResult.AvgCacheHitRate,
+		"total_cache_read_tokens": userResult.TotalCacheReadTokens,
+		"total_prompt_tokens":    userResult.TotalPromptTokens,
+
+		// Warmup cost
+		"warmup_cost": warmupCost,
+
+		// ROI metrics
+		"net_savings":      netSavings,
+		"roi":              roi,
+		"break_even_point": breakEvenPoint,
+
+		// Efficiency indicators
+		"is_cost_effective": netSavings > 0,
+		"efficiency_ratio":  userResult.TotalCostSaved / (userResult.TotalCostWithCache + warmupCost),
+	}, nil
+}
+
+// GetCacheTrendMetrics retrieves time-series trend data for cache performance
+// Used for detecting cache efficiency degradation over time
+// ECP-B2: KISS - simple bucketing by hour for trend analysis
+func GetCacheTrendMetrics(startTime, endTime time.Time, bucketSize time.Duration) ([]map[string]interface{}, error) {
+	var results []struct {
+		TimeBucket      time.Time
+		TotalRequests   int64
+		AvgCacheHitRate float64
+		TotalCostSaved  float64
+	}
+
+	// Use hourly buckets by default
+	bucketFormat := "datetime(created_at, 'start of hour')"
+	if bucketSize >= 24*time.Hour {
+		bucketFormat = "date(created_at)"
+	}
+
+	err := DB.Model(&PromptCacheMetrics{}).
+		Select(bucketFormat+" as time_bucket, COUNT(*) as total_requests, AVG(cache_hit_rate) as avg_cache_hit_rate, SUM(cost_saved) as total_cost_saved").
+		Where("created_at >= ? AND created_at <= ? AND is_warmup = ?", startTime, endTime, false).
+		Group("time_bucket").
+		Order("time_bucket ASC").
+		Scan(&results).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to map slice
+	trends := make([]map[string]interface{}, len(results))
+	for i, r := range results {
+		trends[i] = map[string]interface{}{
+			"timestamp":        r.TimeBucket.Unix(),
+			"total_requests":   r.TotalRequests,
+			"avg_cache_hit_rate": r.AvgCacheHitRate,
+			"total_cost_saved": r.TotalCostSaved,
+		}
+	}
+
+	return trends, nil
+}

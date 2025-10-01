@@ -106,6 +106,7 @@ type RelayInfo struct {
 	RelayFormat            types.RelayFormat
 	SendResponseCount      int
 	FinalPreConsumedQuota  int // 最终预消耗的配额
+	CacheTTL               string // Cache TTL for prompt caching: "5m" or "1h"
 
 	PriceData types.PriceData
 
@@ -279,6 +280,19 @@ func GenRelayInfoClaude(c *gin.Context, request dto.Request) *RelayInfo {
 	info.ClaudeConvertInfo = &ClaudeConvertInfo{
 		LastMessagesType: LastMessageTypeNone,
 	}
+
+	// Retrieve cache TTL from context (set by applyPoolCacheToClaudeRequest)
+	// ECP-C1: Defensive Programming - default to 5m if not set
+	cacheTTL, exists := c.Get("cache_ttl")
+	if exists {
+		if ttlStr, ok := cacheTTL.(string); ok {
+			info.CacheTTL = ttlStr
+		}
+	}
+	if info.CacheTTL == "" {
+		info.CacheTTL = "5m" // Default
+	}
+
 	return info
 }
 

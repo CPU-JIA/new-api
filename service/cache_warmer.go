@@ -37,6 +37,14 @@ type ChannelCacheMetrics struct {
 	WarmupEnabled      bool      // Whether warmup is currently active
 	PaddingContent     string    // Channel-specific padding content
 	EnablePoolCache    bool      // Whether pool cache is enabled for this channel
+	OptimalInterval    time.Duration // Dynamically calculated warmup interval
+	RequestRate        float64       // Requests per 5 minutes (rolling average)
+	TTL                string        // Cache TTL: "5m" or "1h"
+
+	// ECP-C3: Performance Awareness - ROI monitoring for auto-disable
+	WarmupCount       int       // Total number of warmup requests sent
+	LastROICheck      time.Time // Last time ROI was evaluated
+	ConsecutiveLowROI int       // Counter for consecutive low ROI detections
 }
 
 var (
@@ -96,11 +104,17 @@ func (cw *CacheWarmerService) RecordRequest(channelID int, channelName string, s
 		return
 	}
 
+	// ECP-B1: DRY - normalize configuration in one place
+	settings.NormalizeCacheConfig()
+
 	cw.mu.Lock()
 	defer cw.mu.Unlock()
 
 	now := time.Now()
 	metrics, exists := cw.channelMetrics[channelID]
+
+	// Get TTL configuration (now guaranteed to have default value)
+	cacheTTL := settings.CacheTTL
 
 	if !exists {
 		metrics = &ChannelCacheMetrics{
@@ -110,6 +124,7 @@ func (cw *CacheWarmerService) RecordRequest(channelID int, channelName string, s
 			LastRequest:     now,
 			EnablePoolCache: true,
 			PaddingContent:  settings.CachePaddingContent,
+			TTL:             cacheTTL,
 		}
 		cw.channelMetrics[channelID] = metrics
 	}
@@ -122,21 +137,61 @@ func (cw *CacheWarmerService) RecordRequest(channelID int, channelName string, s
 
 	metrics.RequestCount5Min++
 	metrics.LastRequest = now
+	metrics.TTL = cacheTTL // Update TTL in case it changed
 
-	// Check if warmup should be enabled
+	// Update rolling average request rate
+	metrics.RequestRate = float64(metrics.RequestCount5Min)
+
+	// Check if warmup should be enabled (use normalized threshold)
 	threshold := settings.WarmupThreshold
-	if threshold == 0 {
-		threshold = cw.warmupThreshold
-	}
 
 	if metrics.RequestCount5Min >= threshold {
 		if !metrics.WarmupEnabled {
 			metrics.WarmupEnabled = true
+			// Calculate initial optimal interval based on TTL and request rate
+			metrics.OptimalInterval = cw.calculateWarmupInterval(metrics.RequestRate, metrics.TTL)
 			if common.DebugEnabled {
-				common.SysLog(fmt.Sprintf("CacheWarmer: Enabled for channel %s (id=%d), requests=%d",
-					channelName, channelID, metrics.RequestCount5Min))
+				common.SysLog(fmt.Sprintf("CacheWarmer: Enabled for channel %s (id=%d), requests=%d, interval=%v, TTL=%s",
+					channelName, channelID, metrics.RequestCount5Min, metrics.OptimalInterval, metrics.TTL))
 			}
 		}
+	}
+}
+
+// calculateWarmupInterval calculates the optimal warmup interval based on request rate and TTL
+// ECP-C3: Performance Awareness - optimize warmup frequency based on actual usage and TTL
+func (cw *CacheWarmerService) calculateWarmupInterval(requestRate float64, ttl string) time.Duration {
+	// For 1-hour TTL, use longer intervals to reduce warmup cost
+	if ttl == "1h" {
+		// Base interval: 45 minutes (safe margin before 1-hour expiry)
+		// Adjust based on request rate for active channels
+		switch {
+		case requestRate >= 50:
+			return 40 * time.Minute // Ultra-high frequency: warmup more often
+		case requestRate >= 20:
+			return 45 * time.Minute // High frequency: standard interval
+		case requestRate >= 10:
+			return 50 * time.Minute // Medium frequency: safe margin
+		default:
+			return 50 * time.Minute // Low frequency: maximum interval
+		}
+	}
+
+	// For 5-minute TTL, use existing dynamic logic
+	// requestRate is requests per 5 minutes
+	// We want to warmup before the 5-minute cache expires
+	switch {
+	case requestRate >= 50:
+		return 2 * time.Minute // Ultra-high frequency
+	case requestRate >= 20:
+		return 3 * time.Minute // High frequency
+	case requestRate >= 10:
+		return 4 * time.Minute // Medium frequency (default)
+	case requestRate >= 5:
+		return 270 * time.Second // Low frequency (4.5 min)
+	default:
+		// Very low frequency: use default but might be disabled anyway
+		return cw.warmupInterval
 	}
 }
 
@@ -153,29 +208,65 @@ func (cw *CacheWarmerService) run() {
 }
 
 // checkAndWarmup checks all channels and sends warmup requests if needed
+// ECP-C1: Defensive Programming - use Lock instead of RLock to prevent race conditions
+// This function modifies metrics fields (LastROICheck, ConsecutiveLowROI, WarmupEnabled)
 func (cw *CacheWarmerService) checkAndWarmup() {
-	cw.mu.RLock()
+	cw.mu.Lock()
 	channelsToWarmup := make([]*ChannelCacheMetrics, 0)
 
 	now := time.Now()
 	for _, metrics := range cw.channelMetrics {
 		if metrics.WarmupEnabled {
+			// ECP-C3: Performance Awareness - evaluate ROI every 10 minutes
+			timeSinceLastROICheck := now.Sub(metrics.LastROICheck)
+			if metrics.LastROICheck.IsZero() || timeSinceLastROICheck >= 10*time.Minute {
+				metrics.LastROICheck = now
+				cw.evaluateChannelPerformance(metrics)
+				// Check if evaluation disabled the channel
+				if !metrics.WarmupEnabled {
+					continue
+				}
+			}
+
+			// Recalculate optimal interval based on current request rate and TTL
+			// ECP-C3: Performance Awareness - dynamic interval adjustment
+			if metrics.OptimalInterval == 0 {
+				metrics.OptimalInterval = cw.calculateWarmupInterval(metrics.RequestRate, metrics.TTL)
+			}
+
 			// Check if it's time to send warmup
 			timeSinceLastWarmup := now.Sub(metrics.LastWarmup)
 			timeSinceLastRequest := now.Sub(metrics.LastRequest)
 
+			// Use dynamic interval instead of fixed warmupInterval
+			warmupInterval := metrics.OptimalInterval
+			if warmupInterval == 0 {
+				warmupInterval = cw.warmupInterval // fallback
+			}
+
 			// Send warmup if:
 			// 1. Never sent before OR
-			// 2. More than warmupInterval since last warmup AND less than 5min since last user request
+			// 2. More than optimal interval since last warmup AND less than TTL expiry since last user request
+			maxIdleTime := 5 * time.Minute // Default for 5m TTL
+			if metrics.TTL == "1h" {
+				maxIdleTime = 65 * time.Minute // Allow slightly more than 1 hour for 1h TTL
+			}
+
 			shouldWarmup := metrics.LastWarmup.IsZero() ||
-				(timeSinceLastWarmup >= cw.warmupInterval && timeSinceLastRequest < 5*time.Minute)
+				(timeSinceLastWarmup >= warmupInterval && timeSinceLastRequest < maxIdleTime)
 
 			if shouldWarmup {
 				channelsToWarmup = append(channelsToWarmup, metrics)
 			}
 
-			// Disable warmup if no requests for more than 10 minutes
-			if timeSinceLastRequest > 10*time.Minute {
+			// Disable warmup if no requests for extended period
+			// For 1h TTL, allow longer idle time before disabling
+			maxInactiveTime := 10 * time.Minute
+			if metrics.TTL == "1h" {
+				maxInactiveTime = 70 * time.Minute
+			}
+
+			if timeSinceLastRequest > maxInactiveTime {
 				metrics.WarmupEnabled = false
 				if common.DebugEnabled {
 					common.SysLog(fmt.Sprintf("CacheWarmer: Disabled for channel %s (id=%d), idle=%v",
@@ -184,7 +275,7 @@ func (cw *CacheWarmerService) checkAndWarmup() {
 			}
 		}
 	}
-	cw.mu.RUnlock()
+	cw.mu.Unlock()
 
 	// Send warmup requests outside the lock
 	for _, metrics := range channelsToWarmup {
@@ -211,12 +302,68 @@ func (cw *CacheWarmerService) sendWarmupRequest(metrics *ChannelCacheMetrics) {
 			common.SysError(fmt.Sprintf("CacheWarmer: Warmup failed for channel %s (id=%d): %v",
 				metrics.ChannelName, metrics.ChannelID, err))
 		} else {
+			// ECP-C3: Performance Awareness - track successful warmups for ROI calculation
+			cw.mu.Lock()
+			metrics.WarmupCount++
+			cw.mu.Unlock()
+
 			if common.DebugEnabled {
-				common.SysLog(fmt.Sprintf("CacheWarmer: Warmup succeeded for channel %s (id=%d)",
-					metrics.ChannelName, metrics.ChannelID))
+				common.SysLog(fmt.Sprintf("CacheWarmer: Warmup succeeded for channel %s (id=%d), total_warmups=%d",
+					metrics.ChannelName, metrics.ChannelID, metrics.WarmupCount))
 			}
 		}
 	}()
+}
+
+// evaluateChannelPerformance evaluates channel ROI and auto-disables if inefficient
+// ECP-C3: Performance Awareness - prevent wasteful warmup spending
+func (cw *CacheWarmerService) evaluateChannelPerformance(metrics *ChannelCacheMetrics) {
+	// Skip evaluation if no warmups sent yet
+	if metrics.WarmupCount == 0 {
+		return
+	}
+
+	// Calculate estimated hourly requests based on current 5-min window
+	// RequestCount5Min * 12 = estimated requests per hour
+	estimatedHourlyRequests := metrics.RequestCount5Min * 12
+	if estimatedHourlyRequests == 0 {
+		// No requests in current window, skip evaluation
+		return
+	}
+
+	// ROI Heuristic: WarmupCount / EstimatedHourlyRequests
+	// If ratio > 1.5, we're sending more warmups than requests (negative ROI)
+	roiRatio := float64(metrics.WarmupCount) / float64(estimatedHourlyRequests)
+	isLowROI := roiRatio > 1.5
+
+	if isLowROI {
+		metrics.ConsecutiveLowROI++
+		common.SysLog(fmt.Sprintf("CacheWarmer: Low ROI detected for channel %s (id=%d): "+
+			"warmups=%d, est_hourly_requests=%d, roi_ratio=%.2f, consecutive_low=%d",
+			metrics.ChannelName, metrics.ChannelID, metrics.WarmupCount,
+			estimatedHourlyRequests, roiRatio, metrics.ConsecutiveLowROI))
+
+		// Auto-disable after 3 consecutive low ROI detections
+		if metrics.ConsecutiveLowROI >= 3 {
+			metrics.WarmupEnabled = false
+			common.SysLog(fmt.Sprintf("CacheWarmer: AUTO-DISABLED warmup for channel %s (id=%d) "+
+				"due to sustained negative ROI (warmups=%d > 1.5x est_requests=%d). "+
+				"Cost savings: ~$%.3f/hour. Re-enable manually if traffic increases.",
+				metrics.ChannelName, metrics.ChannelID, metrics.WarmupCount,
+				estimatedHourlyRequests, float64(metrics.WarmupCount)*0.001))
+			// Reset counters for potential future re-evaluation
+			metrics.ConsecutiveLowROI = 0
+		}
+	} else {
+		// Good ROI, reset counter
+		if metrics.ConsecutiveLowROI > 0 {
+			common.SysLog(fmt.Sprintf("CacheWarmer: Good ROI for channel %s (id=%d): "+
+				"warmups=%d, est_hourly_requests=%d, roi_ratio=%.2f (reset low_roi counter)",
+				metrics.ChannelName, metrics.ChannelID, metrics.WarmupCount,
+				estimatedHourlyRequests, roiRatio))
+		}
+		metrics.ConsecutiveLowROI = 0
+	}
 }
 
 // doSendWarmup performs the actual warmup HTTP request
@@ -267,12 +414,24 @@ func (cw *CacheWarmerService) doSendWarmup(metrics *ChannelCacheMetrics) error {
 		},
 	}
 
-	// Build system with cache control (only if model supports it)
+	// Build system with cache control based on TTL (only if model supports it)
+	// TTL is guaranteed to be set by Normalize in RecordRequest
+	// ECP-B1: DRY - no need to check for empty string
+	cacheTTL := metrics.TTL
+
+	// Generate cache_control JSON based on TTL
+	var cacheControlJSON json.RawMessage
+	if cacheTTL == "1h" {
+		cacheControlJSON = json.RawMessage(`{"type":"ephemeral","ttl":"1h"}`)
+	} else {
+		cacheControlJSON = json.RawMessage(`{"type":"ephemeral"}`) // Default 5m
+	}
+
 	systemBlocks := []dto.ClaudeMediaMessage{
 		{
 			Type:         "text",
 			Text:         common.GetPointer(paddingContent),
-			CacheControl: json.RawMessage(`{"type":"ephemeral"}`),
+			CacheControl: cacheControlJSON,
 		},
 	}
 	claudeRequest.System = systemBlocks
